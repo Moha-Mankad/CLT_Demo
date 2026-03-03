@@ -82,7 +82,7 @@
 
     function enableAdmin() {
         const pass = prompt("Enter Admin Password:");
-        if (pass === "1234") { // Set your own password here
+        if (pass === "itsasecret") { // Set your own password here
             isAdmin = true;
             document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'block');
             document.getElementById('adminBtn').style.display = 'none';
@@ -94,3 +94,4 @@
 </script>
 </body>
 </html>
+
