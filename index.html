@@ -1,145 +1,96 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>Dynamic Tube Tracker</title>
+    <title>Live Admin Dashboard</title>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
     <style>
-        body { font-family: sans-serif; background: #f4f4f9; margin: 0; display: flex; flex-direction: column; align-items: center; }
-        
-        /* Control Panel */
-        .controls { width: 100%; background: #2c3e50; color: white; padding: 20px; display: flex; gap: 30px; align-items: center; justify-content: center; position: sticky; top: 0; z-index: 10; }
-        .reset-btn { background: #e74c3c; color: white; border: none; padding: 10px 20px; font-weight: bold; cursor: pointer; border-radius: 4px; }
-        .reset-btn:hover { background: #c0392b; }
-        
-        /* Tube Grid */
-        .game-container { display: flex; gap: 4px; padding: 40px 10px; align-items: flex-end; }
-        .column { display: flex; flex-direction: column; align-items: center; gap: 5px; }
-        
-        .value-label { font-size: 10px; color: #7f8c8d; height: 15px; }
-        
-        /* The Fixed Frame */
-        .tube-frame { 
-            width: 25px; 
-            height: 500px; 
-            background: white; 
-            border: 1px solid #bdc3c7; 
-            position: relative; 
-            overflow: hidden; /* This keeps the "liquid" inside the box */
-        }
-        
-        /* The Scaling Content */
-        .liquid { 
-            width: 100%; 
-            background: #3498db; 
-            position: absolute; 
-            bottom: 0; 
-            transition: height 0.2s ease-out; /* Smooth scaling */
-        }
-        
-        .add-btn { width: 30px; cursor: pointer; }
-        .id-label { font-weight: bold; font-size: 14px; }
+        /* Existing CSS from previous steps + some new styles */
+        body { font-family: sans-serif; text-align: center; background: #f0f2f5; }
+        .controls { background: #2c3e50; color: white; padding: 20px; display: flex; justify-content: center; gap: 20px; align-items: center; }
+        .game-container { display: flex; justify-content: center; align-items: flex-end; gap: 5px; margin-top: 50px; }
+        .tube-frame { width: 20px; height: 500px; background: white; border: 1px solid #ccc; position: relative; overflow: hidden; }
+        .liquid { width: 100%; background: #3498db; position: absolute; bottom: 0; transition: height 0.3s; }
+        .admin-only { display: none; } /* Hidden by default */
     </style>
 </head>
 <body>
 
 <div class="controls">
-    <button class="reset-btn" onclick="handleReset()">RESET ALL</button>
-    <div>
-        <label>Content Y-Scale: </label>
-        <input type="range" id="scaleSlider" min="0.1" max="10" step="0.1" value="1" oninput="updateAllVisuals()">
-        <span id="scaleVal">1.0</span>
+    <button id="adminBtn" onclick="enableAdmin()">🔑 Admin Login</button>
+    <div class="admin-only">
+        <button onclick="handleReset()" style="background:red; color:white;">RESET ALL</button>
+        <label>Y-Scale: </label>
+        <input type="range" id="scaleSlider" min="0.1" max="10" step="0.1" value="1" oninput="updateScaleInDB(this.value)">
     </div>
+    <div id="status">Viewing Live Data...</div>
 </div>
 
-<div class="game-container" id="gameContainer">
-    </div>
+<div class="game-container" id="container"></div>
 
 <script>
-    const minTube = 6;
-    const maxTube = 36;
-    let tubeData = {};
-    let resetStep = 0;
+    // --- PASTE YOUR FIREBASE CONFIG HERE ---
+    const firebaseConfig = {
+  apiKey: "AIzaSyCfEyJjJreYjUPgw3OMZaLfpDvITuHpm3g",
+  authDomain: "cltdemo.firebaseapp.com",
+  databaseURL: "https://cltdemo-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "cltdemo",
+  storageBucket: "cltdemo.firebasestorage.app",
+  messagingSenderId: "630297595230",
+  appId: "1:630297595230:web:ab39e6ad5190db859313cf"
+    };
+    
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    let isAdmin = false;
 
-    // Initialize Data
-    for (let i = minTube; i <= maxTube; i++) {
-        tubeData[i] = 0;
+    // Initialize UI
+    const container = document.getElementById('container');
+    for (let i = 6; i <= 36; i++) {
+        container.innerHTML += `
+            <div class="column">
+                <div class="tube-frame"><div class="liquid" id="liq-${i}"></div></div>
+                <button class="admin-only" onclick="increment(${i})">+</button>
+                <div>${i}</div>
+            </div>`;
     }
 
-    const container = document.getElementById('gameContainer');
+    // 1. LISTEN FOR LIVE UPDATES (For everyone)
+    db.ref('gameState').on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (!data) return;
 
-    // Create the UI
-    function init() {
-        for (let i = minTube; i <= maxTube; i++) {
-            const col = document.createElement('div');
-            col.className = 'column';
-            col.innerHTML = `
-                <div class="value-label" id="val-${i}">0</div>
-                <div class="tube-frame">
-                    <div class="liquid" id="liquid-${i}" style="height: 0px;"></div>
-                </div>
-                <button class="add-btn" onclick="increment(${i})">+</button>
-                <div class="id-label">${i}</div>
-            `;
-            container.appendChild(col);
+        const scale = data.scale || 1;
+        document.getElementById('scaleSlider').value = scale;
+
+        for (let i = 6; i <= 36; i++) {
+            const val = data.tubes ? (data.tubes[i] || 0) : 0;
+            document.getElementById(`liq-${i}`).style.height = (val * scale) + "px";
         }
-    }
+    });
 
+    // 2. ADMIN ACTIONS (Write to DB)
     function increment(id) {
-        tubeData[id] += 10;
-        updateVisual(id);
+        if (!isAdmin) return;
+        db.ref(`gameState/tubes/${id}`).transaction(current => (current || 0) + 10);
     }
 
-    function updateVisual(id) {
-        const multiplier = document.getElementById('scaleSlider').value;
-        const liquid = document.getElementById(`liquid-${id}`);
-        const label = document.getElementById(`val-${id}`);
-        
-        document.getElementById('scaleVal').innerText = multiplier;
-        
-        // Logical Value * Multiplier = Visual Height
-        let visualHeight = tubeData[id] * multiplier;
-        
-        // Apply to style
-        liquid.style.height = visualHeight + 'px';
-        label.innerText = tubeData[id];
+    function updateScaleInDB(val) {
+        if (!isAdmin) return;
+        db.ref('gameState/scale').set(parseFloat(val));
     }
 
-    function updateAllVisuals() {
-        for (let i = minTube; i <= maxTube; i++) {
-            updateVisual(i);
+    function enableAdmin() {
+        const pass = prompt("Enter Admin Password:");
+        if (pass === "1234") { // Set your own password here
+            isAdmin = true;
+            document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'block');
+            document.getElementById('adminBtn').style.display = 'none';
+            document.getElementById('status').innerText = "Logged in as Admin";
         }
     }
-
-    // Triple Reset Logic
-    function handleReset() {
-        const messages = [
-            "Reset all tubes?",
-            "Are you really sure?",
-            "Final warning: Wipe everything?"
-        ];
-
-        if (confirm(messages[resetStep])) {
-            resetStep++;
-            if (resetStep > 2) {
-                performReset();
-                resetStep = 0;
-            } else {
-                handleReset(); // Call next confirmation
-            }
-        } else {
-            resetStep = 0; // User cancelled
-        }
-    }
-
-    function performReset() {
-        for (let i = minTube; i <= maxTube; i++) {
-            tubeData[i] = 0;
-            updateVisual(i);
-        }
-    }
-
-    init();
+    
+    // ... Add handleReset and performReset using db.ref('gameState').set(null) ...
 </script>
-
 </body>
 </html>
